@@ -1,0 +1,12 @@
+name = "ajui-travel-api"
+main = "src/index.js"
+compatibility_date = "2026-08-01"
+
+# Variables de entorno (no secretas) - ajusta si hace falta
+[vars]
+ENVIRONMENT = "development"
+
+# Los secretos NO van aquí. Se configuran con:
+#   wrangler secret put TRAVELPAYOUTS_TOKEN
+#   wrangler secret put TRAVELPAYOUTS_MARKER
+# (Google Places ya no hace falta: usamos Hotellook + link directo a Google Maps)
