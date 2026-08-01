@@ -179,7 +179,7 @@ function getMockFlights({ origin, destination, departureDate, returnDate, adults
 // ---------------------------------------------------------------------------
 
 async function handleHotelSearch(body, env) {
-  const { destination, checkIn, checkOut, adults } = body;
+  const { destination, checkIn, checkOut, adults = 1 } = body;
 
   if (!destination || !checkIn || !checkOut) {
     return jsonResponse(
@@ -188,68 +188,60 @@ async function handleHotelSearch(body, env) {
     );
   }
 
-  if (!env.TRAVELPAYOUTS_TOKEN) {
-    return jsonResponse(getMockHotels({ destination, checkIn, checkOut, adults }));
-  }
+  // NOTA IMPORTANTE (descubierto en pruebas): Hotellook cerró como marca en
+  // octubre de 2025, su API ya no funciona. Mientras no tengamos aprobada
+  // una API real de hoteles (Booking/Agoda vía Travelpayouts, requiere
+  // solicitud), generamos un link directo YA FILTRADO por 4 estrellas y
+  // habitación privada, para que el usuario vea resultados reales de verdad
+  // con un clic, aunque no estén "dentro" de nuestra app todavía.
 
-  try {
-    // 1) Buscar el ID de localización de Hotellook para la ciudad destino
-    const locationId = await hotellookLookupCity(destination, env);
-    if (!locationId) {
-      return jsonResponse({ destination, hotels: [], note: "No se encontró la ciudad en Hotellook" });
-    }
+  const googleHotelsUrl = buildGoogleHotelsUrl({ destination, checkIn, checkOut, adults });
+  const trivagoUrl = buildTrivagoUrl({ destination, checkIn, checkOut, adults });
+  const bookingUrl = buildBookingSearchUrl({ destination, checkIn, checkOut, adults });
 
-    // 2) Pedir la colección "4-stars" (ya filtrada por Hotellook, sin coste extra)
-    const collectionUrl = new URL("https://yasen.hotellook.com/tp/public/widget_location_dump.json");
-    collectionUrl.searchParams.set("id", locationId);
-    collectionUrl.searchParams.set("type", "4-stars");
-    collectionUrl.searchParams.set("check_in", checkIn);
-    collectionUrl.searchParams.set("check_out", checkOut);
-    collectionUrl.searchParams.set("currency", "eur");
-    collectionUrl.searchParams.set("language", "es");
-    collectionUrl.searchParams.set("limit", "15");
-    collectionUrl.searchParams.set("token", env.TRAVELPAYOUTS_TOKEN);
-
-    const res = await fetch(collectionUrl);
-    const raw = await res.json();
-
-    const hotels = (Array.isArray(raw) ? raw : []).map((h) => ({
-      name: h.name,
-      stars: h.stars,
-      pricePerRoomTotal: h.priceFrom ?? h.price ?? null,
-      currency: "EUR",
-      googleMapsUrl: buildGoogleMapsLink(h.name, destination),
-      bookingUrl: h.url || `https://search.hotellook.com/?hotelId=${h.hotelId}`,
-      source: "hotellook",
-      // NOTA: "privado con baño propio" no viene marcado en esta colección;
-      // Hotellook trabaja con hoteles/aparthoteles (no alberga hostels de
-      // habitación compartida en sus colecciones por estrellas), pero si
-      // quieres una garantía estricta habría que cruzarlo con la Search API
-      // en tiempo real (la que pedimos por aprobación).
-    }));
-
-    return jsonResponse({ destination, checkIn, checkOut, adults, source: "hotellook", hotels });
-  } catch (err) {
-    return jsonResponse({ error: "Fallo al consultar Hotellook", detail: String(err) }, 502);
-  }
+  return jsonResponse({
+    destination,
+    checkIn,
+    checkOut,
+    adults,
+    mode: "link-out",
+    note: "Sin API de comparación aprobada todavía. Estos son comparadores reales (no un solo vendedor), ya filtrados por 4+ estrellas donde el sitio lo permite por URL.",
+    links: [
+      { provider: "Google Hotels (comparador, recomendado)", url: googleHotelsUrl },
+      { provider: "Trivago (comparador)", url: trivagoUrl },
+      { provider: "Booking.com (un solo vendedor, filtro 4+ estrellas aplicado)", url: bookingUrl },
+    ],
+  });
 }
 
-async function hotellookLookupCity(query, env) {
-  const url = new URL("https://engine.hotellook.com/api/v2/lookup.json");
-  url.searchParams.set("query", query);
-  url.searchParams.set("lang", "es");
-  url.searchParams.set("lookFor", "city");
-  url.searchParams.set("limit", "1");
-  url.searchParams.set("token", env.TRAVELPAYOUTS_TOKEN);
-
-  const res = await fetch(url);
-  const json = await res.json();
-  return json?.results?.locations?.[0]?.id || null;
+function buildGoogleHotelsUrl({ destination, checkIn, checkOut, adults }) {
+  const url = new URL("https://www.google.com/travel/search");
+  url.searchParams.set("q", `hoteles 4 estrellas en ${destination}`);
+  url.searchParams.set("checkin", checkIn);
+  url.searchParams.set("checkout", checkOut);
+  url.searchParams.set("adults", String(adults));
+  return url.toString();
 }
 
-function buildGoogleMapsLink(hotelName, city) {
-  const query = encodeURIComponent(`${hotelName} ${city}`);
-  return `https://www.google.com/maps/search/?api=1&query=${query}`;
+function buildTrivagoUrl({ destination, checkIn, checkOut, adults }) {
+  const url = new URL("https://www.trivago.com/en-US/srl");
+  url.searchParams.set("search", `100-${encodeURIComponent(destination)}`);
+  url.searchParams.set("date_from", checkIn);
+  url.searchParams.set("date_to", checkOut);
+  url.searchParams.set("adults", String(adults));
+  return url.toString();
+
+function buildBookingSearchUrl({ destination, checkIn, checkOut, adults }) {
+  const url = new URL("https://www.booking.com/searchresults.html");
+  url.searchParams.set("ss", destination);
+  url.searchParams.set("checkin", checkIn);
+  url.searchParams.set("checkout", checkOut);
+  url.searchParams.set("group_adults", String(adults));
+  url.searchParams.set("no_rooms", "1");
+  url.searchParams.set("group_children", "0");
+  // Filtro de 4 y 5 estrellas ya aplicado en la propia URL de resultados
+  url.searchParams.set("nflt", "class=4;class=5");
+  return url.toString();
 }
 
 function getMockHotels({ destination, checkIn, checkOut, adults = 1 }) {
