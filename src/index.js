@@ -85,7 +85,7 @@ async function handleFlightSearch(body, env) {
 
 // Modo mapa: destinos más baratos desde un origen, SIN destino fijo.
 async function handleCheapestFromOrigin(body, env) {
-  const { origin, currency = "EUR" } = body;
+  const { origin, currency = "EUR", month } = body; // month: "2026-09" (opcional)
   if (!origin) return jsonResponse({ error: "Falta origin" }, 400);
   if (!env.TRAVELPAYOUTS_TOKEN) {
     return jsonResponse({ origin, source: "mock", destinations: [] });
@@ -97,9 +97,15 @@ async function handleCheapestFromOrigin(body, env) {
   url.searchParams.set("limit", "30");
   url.searchParams.set("show_to_affiliates", "true");
 
+  if (month) {
+    // Esta API filtra por mes de salida, no por día exacto
+    url.searchParams.set("period_type", "month");
+    url.searchParams.set("beginning_of_period", `${month}-01`);
+  }
+
   const res = await fetch(url, { headers: { "X-Access-Token": env.TRAVELPAYOUTS_TOKEN } });
   const json = await res.json();
-  return jsonResponse({ origin, source: "travelpayouts", raw: json });
+  return jsonResponse({ origin, month: month || null, source: "travelpayouts", raw: json });
 }
 
 async function fetchTravelpayoutsCheapFlights({ origin, destination, departureDate, returnDate, env }) {
@@ -195,9 +201,8 @@ async function handleHotelSearch(body, env) {
   // habitación privada, para que el usuario vea resultados reales de verdad
   // con un clic, aunque no estén "dentro" de nuestra app todavía.
 
-  const googleHotelsUrl = buildGoogleHotelsUrl({ destination, checkIn, checkOut, adults });
-  const trivagoUrl = buildTrivagoUrl({ destination, checkIn, checkOut, adults });
   const bookingUrl = buildBookingSearchUrl({ destination, checkIn, checkOut, adults });
+  const googleSearchUrl = buildGoogleSearchFallback({ destination, checkIn, checkOut });
 
   return jsonResponse({
     destination,
@@ -205,30 +210,17 @@ async function handleHotelSearch(body, env) {
     checkOut,
     adults,
     mode: "link-out",
-    note: "Sin API de comparación aprobada todavía. Estos son comparadores reales (no un solo vendedor), ya filtrados por 4+ estrellas donde el sitio lo permite por URL.",
+    note: "Booking.com respeta de verdad fechas y filtro de estrellas por URL. Google/Trivago no tienen un formato de URL público fiable, así que de momento solo dejamos una búsqueda simple de Google como respaldo visual.",
     links: [
-      { provider: "Google Hotels (comparador, recomendado)", url: googleHotelsUrl },
-      { provider: "Trivago (comparador)", url: trivagoUrl },
-      { provider: "Booking.com (un solo vendedor, filtro 4+ estrellas aplicado)", url: bookingUrl },
+      { provider: "Booking.com (filtro 4+ estrellas y fechas aplicados)", url: bookingUrl },
+      { provider: "Búsqueda en Google (respaldo, sin filtro automático)", url: googleSearchUrl },
     ],
   });
 }
 
-function buildGoogleHotelsUrl({ destination, checkIn, checkOut, adults }) {
-  const url = new URL("https://www.google.com/travel/search");
-  url.searchParams.set("q", `hoteles 4 estrellas en ${destination}`);
-  url.searchParams.set("checkin", checkIn);
-  url.searchParams.set("checkout", checkOut);
-  url.searchParams.set("adults", String(adults));
-  return url.toString();
-}
-
-function buildTrivagoUrl({ destination, checkIn, checkOut, adults }) {
-  const url = new URL("https://www.trivago.com/en-US/srl");
-  url.searchParams.set("search", `100-${encodeURIComponent(destination)}`);
-  url.searchParams.set("date_from", checkIn);
-  url.searchParams.set("date_to", checkOut);
-  url.searchParams.set("adults", String(adults));
+function buildGoogleSearchFallback({ destination, checkIn, checkOut }) {
+  const url = new URL("https://www.google.com/search");
+  url.searchParams.set("q", `hoteles 4 estrellas en ${destination} del ${checkIn} al ${checkOut}`);
   return url.toString();
 }
 
@@ -240,6 +232,8 @@ function buildBookingSearchUrl({ destination, checkIn, checkOut, adults }) {
   url.searchParams.set("group_adults", String(adults));
   url.searchParams.set("no_rooms", "1");
   url.searchParams.set("group_children", "0");
+  url.searchParams.set("lang", "es");
+  url.searchParams.set("selected_currency", "EUR");
   // Filtro de 4 y 5 estrellas ya aplicado en la propia URL de resultados
   url.searchParams.set("nflt", "class=4;class=5");
   return url.toString();
