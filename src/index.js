@@ -230,6 +230,7 @@ function buildTrivagoUrl({ destination, checkIn, checkOut, adults }) {
   url.searchParams.set("date_to", checkOut);
   url.searchParams.set("adults", String(adults));
   return url.toString();
+}
 
 function buildBookingSearchUrl({ destination, checkIn, checkOut, adults }) {
   const url = new URL("https://www.booking.com/searchresults.html");
